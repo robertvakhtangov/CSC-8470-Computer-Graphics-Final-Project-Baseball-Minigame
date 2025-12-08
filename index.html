@@ -36,7 +36,7 @@
           40,
           canvas.width / canvas.height,
           1,
-          500
+          1500
         );
         camera.position.set(0, 3, 50);
         // Look at the center of the scene
@@ -93,6 +93,7 @@
       function render() {
         requestAnimationFrame(render); // Keep calling render before the next frame
         controls.update(); // Update orbit controls (camera movement)
+        controls.enabled = false;
         update(camera); // Call student animation code
         renderer.render(scene, camera); // Draw the current scene from the camera's POV
       }

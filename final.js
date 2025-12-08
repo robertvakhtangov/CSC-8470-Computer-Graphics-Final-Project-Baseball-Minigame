@@ -4,52 +4,186 @@ import { TransformControls } from "https://csc-vu.github.io/lib/TransformControl
 import { GLTFLoader } from "https://csc-vu.github.io/lib/GLTFLoader.js";
 import KeyboardState from "https://csc-vu.github.io/lib/KeyboardState.js";
 
+const uiContainer = document.createElement("div");
+Object.assign(uiContainer.style, {
+  position: "fixed",
+  bottom: "20px",
+  left: "50%",
+  transform: "translateX(-45%)",
+  width: "100%",
+  display: "flex",
+  gap: "20px",
+  zIndex: 9999,
+});
+document.body.appendChild(uiContainer);
+
+// Helper to create UI boxes
+function createUIBox(text) {
+  const box = document.createElement("div");
+  box.textContent = text;
+
+  Object.assign(box.style, {
+    padding: "10px 20px",
+    background: "rgba(0, 0, 0, 0.6)",
+    color: "white",
+    fontFamily: "sans-serif",
+    borderRadius: "8px",
+    border: "1px solid rgba(255, 255, 255, 0.3)",
+    backdropFilter: "blur(4px)",
+  });
+
+  return box;
+}
+
+uiContainer.appendChild(createUIBox("Enter to Pitch"));
+uiContainer.appendChild(createUIBox("Space to Swing"));
+uiContainer.appendChild(createUIBox("C - Toggle Chase View"));
+uiContainer.appendChild(createUIBox("B - Toggle Ball View"));
+uiContainer.appendChild(createUIBox("Right Arrow - Next Camera Position"));
+uiContainer.appendChild(createUIBox("Left Arrow - Previous Camera Position"));
+
 const loader = new GLTFLoader();
-let mixer;
+let pitcherAnims;
 const clock = new THREE.Clock();
 let textureLoader = new THREE.TextureLoader();
 let bat;
 let mixerBat;
 let ball;
 let swingAction;
-let ballIncrement = 0;
-let intervalId;
-let frictionCoefficient = 0.99;
+let groundFrictionCoefficient = 0.99;
+let airFrictionCoefficient = 0.999;
 let batHitCenter;
 let batHitSurface;
-
+let wasBallHit = false;
+let didMiss = false;
 let keyboard = new KeyboardState();
+let isPitching = false;
+let isRecovering = false;
+let followBall = false;
+let cameraModeChangedFollow = false;
+let cameraModeChangedChase = false;
+let cameraModeChangedNextPosition = false;
+let cameraModeChangedPrevPosition = false;
+let chaseBall = false;
+let cameraPositionIndex = 0;
+let cameraPositions = [
+  [-30, 30, 100],
+  [90, 30, 0],
+];
+let spacePressed = false;
 
-function loadModels(scene) {
-  const loader = new GLTFLoader();
-  const urlPitcher = "./pitcher.glb";
-  const urlField = "./baseball_field.glb";
+function loadPitcherModel(scene) {
+  return new Promise((resolve, reject) => {
+    const loader = new GLTFLoader();
+    const urlPitcher = "./pitcher3.glb";
 
-  function onLoadPitcher(gltf) {
-    let pitcher = gltf.scene;
-    scene.add(pitcher);
-    pitcher.scale.set(5, 5, 5);
-    pitcher.position.set(-25, 0, 0);
-    pitcher.rotation.set(0, Math.PI / 2, 0);
+    loader.load(urlPitcher, (gltf) => {
+      const pitcher = gltf.scene;
+      scene.add(pitcher);
 
-    mixer = new THREE.AnimationMixer(pitcher);
-    let animations = gltf.animations;
+      pitcher.scale.set(5, 5, 5);
+      pitcher.position.set(-25, 0, 0);
+      pitcher.rotation.set(0, Math.PI / 2, 0);
 
-    const pitch = mixer.clipAction(animations.find((a) => a.name === "Pitch"));
+      const pitcherMixer = new THREE.AnimationMixer(pitcher);
+      const animations = gltf.animations;
 
-    pitch.play();
+      const anims = {
+        mixer: pitcherMixer,
+        pitch: pitcherMixer.clipAction(
+          animations.find((a) => a.name === "Pitch")
+        ),
+        throw: pitcherMixer.clipAction(
+          animations.find((a) => a.name === "Throw")
+        ),
+        miss: pitcherMixer.clipAction(
+          animations.find((a) => a.name === "Miss")
+        ),
+        strike: pitcherMixer.clipAction(
+          animations.find((a) => a.name === "Strike")
+        ),
+        stand: pitcherMixer.clipAction(
+          animations.find((a) => a.name === "Stand")
+        ),
+      };
+
+      resolve(anims);
+    });
+  });
+}
+
+function loadStadiumModel(scene) {
+  return new Promise((resolve, reject) => {
+    const loader = new GLTFLoader();
+    const urlField = "./baseball_field.glb";
+
+    loader.load(urlField, (gltf) => {
+      let field = gltf.scene;
+      scene.add(field);
+      field.scale.set(3, 3, 3);
+      field.position.set(-65, -3.7, -152);
+      field.rotation.set(-Math.PI / 2, 0, Math.PI / 2);
+
+      resolve(field);
+    });
+  });
+}
+
+let throwAc;
+
+function playOnce(action, mixer, anims, modifiers = null) {
+  return new Promise((resolve) => {
+    for (const key in anims) {
+      if (key === "mixer") continue;
+      anims[key].stop();
+      anims[key].setEffectiveWeight(0);
+    }
+
+    action.reset();
+    action.setEffectiveWeight(1);
+    action.clampWhenFinished = true;
+    action.setLoop(THREE.LoopOnce);
+    action.play();
+    action.timeScale = modifiers ? modifiers.timeScale : 1;
+
+    const onFinished = (e) => {
+      if (e.action === action) {
+        mixer.removeEventListener("finished", onFinished);
+        resolve(action);
+      }
+    };
+
+    mixer.addEventListener("finished", onFinished);
+  });
+}
+
+function wait(ms) {
+  return new Promise((res) => setTimeout(res, ms));
+}
+
+async function animatePitcher() {
+  isPitching = true;
+  let throwSpeedModifier = Math.random();
+  await playOnce(pitcherAnims.pitch, pitcherAnims.mixer, pitcherAnims);
+  await wait(Math.random() * 2000);
+  await playOnce(pitcherAnims.throw, pitcherAnims.mixer, pitcherAnims, {
+    timeScale: 1 + throwSpeedModifier,
+  });
+  throwBall(0.5 + throwSpeedModifier);
+  isPitching = false;
+}
+
+async function animateRecovery() {
+  isRecovering = true;
+  if (wasBallHit) {
+    await playOnce(pitcherAnims.miss, pitcherAnims.mixer, pitcherAnims);
+    wasBallHit = false;
   }
-
-  function onLoadField(gltf) {
-    let field = gltf.scene;
-    scene.add(field);
-    field.scale.set(3, 3, 3);
-    field.position.set(-65, -3.7, -152);
-    field.rotation.set(-Math.PI / 2, 0, Math.PI / 2);
+  if (didMiss) {
+    resetBall();
+    await playOnce(pitcherAnims.strike, pitcherAnims.mixer, pitcherAnims);
   }
-
-  loader.load(urlPitcher, onLoadPitcher);
-  loader.load(urlField, onLoadField);
+  isRecovering = false;
 }
 
 function createLights(scene, camera) {
@@ -131,7 +265,6 @@ function createBat() {
 
   bat.scale.set(0.25, 0.25, 0.25);
   bat.position.set(50, 5, 4);
-  // bat.rotation.set(Math.PI / 4, 0, 0);
   return bat;
 }
 
@@ -212,20 +345,23 @@ function createGround(length, width) {
   return ground;
 }
 
-export function buildScene(scene, camera, orbitControls, tfControls) {
+export async function buildScene(scene, camera, orbitControls, tfControls) {
+  pitcherAnims = await loadPitcherModel(scene);
+  await loadStadiumModel(scene);
   // const tfContrls = new TransformControls(camera, document);
-  loadModels(scene);
+  // loadModels(scene);
   const axesHelper = new THREE.AxesHelper(8);
-  scene.add(axesHelper);
+  // scene.add(axesHelper);
   let bat = createBat();
   scene.add(bat);
   animateBat();
+  playOnce(pitcherAnims.stand, pitcherAnims.mixer, pitcherAnims);
 
   let ground = createGround(600, 500);
   ground.position.y = -0.5;
   scene.add(ground);
   ball = createBall(0.5);
-  ball.position.set(50, 7, -1);
+  ball.visible = false;
   scene.add(ball);
 
   tfControls.addEventListener("dragging-changed", function (event) {
@@ -233,19 +369,12 @@ export function buildScene(scene, camera, orbitControls, tfControls) {
   });
   tfControls.attach(ball);
   tfControls.mode = "translate";
-  scene.add(tfControls);
 
-  camera.position.x = 100;
+  camera.position.x = -30;
   camera.position.y = 30;
-  camera.position.z = 0;
-  intervalId = setInterval(throwBall, 5000, 0.5);
+  camera.position.z = 100;
+
   initialPositions(ball);
-  // setTimeout(() => {
-  //   // ball.manualVelocities.x = 0.5;
-  //   ball.manualVelocities.y = 1;
-  //   // ball.position.y = 1;
-  //   // ball.manualVelocities.x = 0;
-  // }, 1000);
 
   createLights(scene, camera);
 }
@@ -273,34 +402,23 @@ function initialPositions(obj) {
 }
 
 function throwBall(speed) {
-  console.log(ball.manualVelocities.x);
-  ball.affectedByGravity = false;
-  if (ball.manualVelocities.x === 0) {
-    ball.position.set(-15, 5, 0);
-    ball.initPositions.x = -15;
-    ball.initPositions.y = 5;
-    ball.initPositions.z = 0;
-  }
+  resetBall();
+  ball.visible = true;
   ball.manualVelocities.x = speed;
-  if (ball.position.x > 100 || !ball.isInFreefall) {
-    // console.log("hi");
-    ball.position.set(-15, 5, 0);
-    ball.manualVelocities.x = 0;
-
-    // clearInterval(intervalId);
-  }
 }
 
 function applyPhysics(obj, delta) {
   if (obj.isInFreefall && obj.affectedByGravity) {
     obj.velocities.y -= (9.8 / 4) * delta;
+    obj.velocities.x *= airFrictionCoefficient;
+    obj.velocities.z *= airFrictionCoefficient;
   }
 
   if (!obj.isInFreefall) {
-    obj.velocities.x *= frictionCoefficient;
-    obj.velocities.z *= frictionCoefficient;
-    obj.initPositions.y = 0.5;
-    obj.position.y = 0.5;
+    obj.velocities.x *= groundFrictionCoefficient;
+    obj.velocities.z *= groundFrictionCoefficient;
+    obj.initPositions.y = 2;
+    obj.position.y = 2;
   }
   obj.position.y += obj.velocities.y;
   obj.position.x += obj.velocities.x;
@@ -339,6 +457,12 @@ function calcVelocities(obj) {
     y: 0,
     z: 0,
   };
+
+  obj.directionVector = new THREE.Vector3(
+    obj.velocities.x,
+    obj.velocities.y,
+    obj.velocities.z
+  );
 }
 
 function calcBatNormalVector() {
@@ -359,8 +483,9 @@ function calcReflectedTrajectory() {
 
 function hitBall() {
   let distance = calcBallBatDistance();
-  console.log(distance);
   if (distance < 2.5) {
+    wasBallHit = true;
+    followBall = true;
     ball.affectedByGravity = true;
     let trajectory = calcReflectedTrajectory();
     ball.manualVelocities.x = trajectory.x;
@@ -380,21 +505,108 @@ function calcBallBatDistance() {
   return distance.length();
 }
 
+function checkWithinBounds() {
+  let stadiumCenter = new THREE.Vector3(-60, 0, 0);
+  let ballPositionNoY = new THREE.Vector3(ball.position.x, 0, ball.position.z);
+  let distVec = new THREE.Vector3();
+  distVec.subVectors(ballPositionNoY, stadiumCenter);
+  if (distVec.length() >= 300) {
+    ball.manualVelocities.x = -ball.velocities.x;
+    ball.manualVelocities.z = -ball.velocities.z;
+  }
+}
+
+function checkBallHit() {
+  if (ball.position.x > 65 && !ball.affectedByGravity) {
+    didMiss = true;
+    spacePressed = false;
+  }
+}
+
+function resetBall() {
+  ball.visible = false;
+  chaseBall = false;
+  ball.affectedByGravity = false;
+  ball.position.set(-15, 5, 0);
+  ball.initPositions.x = -15;
+  ball.initPositions.y = 5;
+  ball.initPositions.z = 0;
+}
+
+function cameraModes(camera) {
+  if (chaseBall) {
+    let tailingVector = ball.directionVector.negate().normalize();
+    camera.position.set(
+      ball.position.x + tailingVector.x * 10,
+      ball.position.y + tailingVector.y * 10,
+      ball.position.z + tailingVector.z * 10
+    );
+    camera.lookAt(ball.position);
+  } else {
+    if (followBall) {
+      camera.lookAt(ball.position);
+    } else {
+      camera.lookAt(new THREE.Vector3(0, 0, 0));
+    }
+
+    camera.position.set(...cameraPositions[cameraPositionIndex]);
+  }
+}
+
 export function update(camera) {
   const delta = clock.getDelta();
   calcVelocities(ball);
   isInFreefall(ball);
   applyPhysics(ball, delta);
-  if (mixer) mixer.update(delta);
+  if (pitcherAnims.mixer) pitcherAnims.mixer.update(delta);
   if (mixerBat) mixerBat.update(delta);
 
   if (keyboard.down(" ")) {
+    spacePressed = true;
     swingAction.play();
     swingAction.reset();
   }
 
   hitBall();
+  checkWithinBounds();
+  checkBallHit();
 
-  // ball.position.x += 1;
-  // camera.lookAt(ball.position);
+  if (keyboard.down("Enter") && !isPitching && !isRecovering) {
+    followBall = false;
+    animatePitcher();
+  }
+
+  if ((wasBallHit || didMiss) && !isPitching && !isRecovering) {
+    animateRecovery();
+    wasBallHit = false;
+    didMiss = false;
+  }
+
+  if (keyboard.down("b") && !cameraModeChangedFollow) {
+    followBall = !followBall;
+  }
+  cameraModeChangedFollow = keyboard.down("b");
+
+  if (keyboard.down("c") && !cameraModeChangedChase && ball.visible) {
+    chaseBall = !chaseBall;
+  }
+  cameraModeChangedChase = keyboard.down("c");
+
+  if (keyboard.down("ArrowRight") && !cameraModeChangedNextPosition) {
+    cameraPositionIndex =
+      cameraPositionIndex === cameraPositions.length - 1
+        ? 0
+        : cameraPositionIndex + 1;
+  }
+  cameraModeChangedNextPosition = keyboard.down("ArrowRight");
+
+  if (keyboard.down("ArrowLeft") && !cameraModeChangedPrevPosition) {
+    cameraPositionIndex =
+      cameraPositionIndex === 0
+        ? cameraPositions.length - 1
+        : cameraPositionIndex - 1;
+  }
+  cameraModeChangedPrevPosition = keyboard.down("ArrowLeft");
+
+  cameraModes(camera);
 }
