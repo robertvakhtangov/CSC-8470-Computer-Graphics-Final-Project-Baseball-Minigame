@@ -72,7 +72,7 @@ let spacePressed = false;
 function loadPitcherModel(scene) {
   return new Promise((resolve, _) => {
     const loader = new GLTFLoader();
-    const urlPitcher = "./pitcher3.glb";
+    const urlPitcher = "./pitcher.glb";
 
     loader.load(urlPitcher, (gltf) => {
       const pitcher = gltf.scene;
