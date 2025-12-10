@@ -549,6 +549,7 @@ export function update(camera) {
   checkBallHit();
 
   if (keyboard.down("Enter") && !isPitching && !isRecovering) {
+    chaseBall = false;
     followBall = false;
     animatePitcher();
   }
