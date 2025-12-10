@@ -1,6 +1,4 @@
 import * as THREE from "https://csc-vu.github.io/lib/three.module.js";
-import { OrbitControls } from "https://csc-vu.github.io/lib/OrbitControls.js";
-import { TransformControls } from "https://csc-vu.github.io/lib/TransformControls.js";
 import { GLTFLoader } from "https://csc-vu.github.io/lib/GLTFLoader.js";
 import KeyboardState from "https://csc-vu.github.io/lib/KeyboardState.js";
 
@@ -17,7 +15,6 @@ Object.assign(uiContainer.style, {
 });
 document.body.appendChild(uiContainer);
 
-// Helper to create UI boxes
 function createUIBox(text) {
   const box = document.createElement("div");
   box.textContent = text;
@@ -73,7 +70,7 @@ let cameraPositions = [
 let spacePressed = false;
 
 function loadPitcherModel(scene) {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve, _) => {
     const loader = new GLTFLoader();
     const urlPitcher = "./pitcher3.glb";
 
@@ -113,7 +110,7 @@ function loadPitcherModel(scene) {
 }
 
 function loadStadiumModel(scene) {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve, _) => {
     const loader = new GLTFLoader();
     const urlField = "./baseball_field.glb";
 
@@ -128,8 +125,6 @@ function loadStadiumModel(scene) {
     });
   });
 }
-
-let throwAc;
 
 function playOnce(action, mixer, anims, modifiers = null) {
   return new Promise((resolve) => {
@@ -186,15 +181,13 @@ async function animateRecovery() {
   isRecovering = false;
 }
 
-function createLights(scene, camera) {
-  // AmbientLight (color, intensity)
-  const ambient = new THREE.AmbientLight(0x404040); // soft light
+function createLights(scene) {
+  const ambient = new THREE.AmbientLight(0x404040);
   scene.add(ambient);
 
-  // Dim overhead DirectionalLight (color, intensity) shining from above
-  const topLight = new THREE.DirectionalLight("white", 1);
-  topLight.position.set(1, 1, 1);
-  scene.add(topLight);
+  const dirLight = new THREE.DirectionalLight("white", 1);
+  dirLight.position.set(1, 1, 1);
+  scene.add(dirLight);
 }
 
 function createCylinder(radiusTop, radiusBottom, height) {
@@ -237,7 +230,6 @@ function createBat() {
   let taper = createCylinder(1.25, 0.5, 6);
   let barrel = createCylinder(1.25, 1.25, 9);
   let end = createEnd(1.25);
-  let guide = createCylinder(0.25, 0.25, 10);
   batHitCenter = new THREE.Object3D();
   batHitSurface = new THREE.Object3D();
   knob.position.y = 5.5;
@@ -250,16 +242,11 @@ function createBat() {
   batHitSurface.position.y = 24.5;
   batHitSurface.position.x = 1;
 
-  guide.position.y = 24.5;
-  guide.position.x = 1;
-  guide.rotation.z = Math.PI / 2;
-
   bat.add(knob);
   bat.add(handle);
   bat.add(taper);
   bat.add(barrel);
   bat.add(end);
-  // bat.add(guide);
   bat.add(batHitCenter);
   bat.add(batHitSurface);
 
@@ -345,13 +332,9 @@ function createGround(length, width) {
   return ground;
 }
 
-export async function buildScene(scene, camera, orbitControls, tfControls) {
+export async function buildScene(scene, camera) {
   pitcherAnims = await loadPitcherModel(scene);
   await loadStadiumModel(scene);
-  // const tfContrls = new TransformControls(camera, document);
-  // loadModels(scene);
-  const axesHelper = new THREE.AxesHelper(8);
-  // scene.add(axesHelper);
   let bat = createBat();
   scene.add(bat);
   animateBat();
@@ -363,12 +346,6 @@ export async function buildScene(scene, camera, orbitControls, tfControls) {
   ball = createBall(0.5);
   ball.visible = false;
   scene.add(ball);
-
-  tfControls.addEventListener("dragging-changed", function (event) {
-    orbitControls.enabled = !event.value;
-  });
-  tfControls.attach(ball);
-  tfControls.mode = "translate";
 
   camera.position.x = -30;
   camera.position.y = 30;
@@ -510,7 +487,7 @@ function checkWithinBounds() {
   let ballPositionNoY = new THREE.Vector3(ball.position.x, 0, ball.position.z);
   let distVec = new THREE.Vector3();
   distVec.subVectors(ballPositionNoY, stadiumCenter);
-  if (distVec.length() >= 300) {
+  if (distVec.length() >= 240) {
     ball.manualVelocities.x = -ball.velocities.x;
     ball.manualVelocities.z = -ball.velocities.z;
   }
