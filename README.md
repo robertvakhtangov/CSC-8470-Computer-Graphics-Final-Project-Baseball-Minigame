@@ -1,6 +1,6 @@
 # CSC 8470 - Computer Graphics, Final Project - Baseball Minigame
 
-**▶ Play it here: https://robertvakhtangov.github.io/CSC-8470-Computer-Graphics-Final-Project-Baseball-Minigame/**
+**▶ Play it here: https://robertvakhtangov.github.io/baseball-minigame/**
 
 A Three.js baseball scene: a keyframe-animated pitcher throws, you swing the bat, and a from-scratch physics system decides where the ball goes.
 
@@ -24,7 +24,7 @@ A Three.js baseball scene: a keyframe-animated pitcher throws, you swing the bat
 
 # 3. URL
 
-https://robertvakhtangov.github.io/CSC-8470-Computer-Graphics-Final-Project-Baseball-Minigame/
+https://robertvakhtangov.github.io/baseball-minigame/
 
 # 4. Movie Description
 
